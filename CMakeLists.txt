@@ -1,8 +1,9 @@
 # Copyright (c) 2022, Alibaba Group Holding Limited
 
 cmake_minimum_required (VERSION 3.15)
-project (xquic VERSION 1.8.1)
-
+project (xquic VERSION 1.8.2)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
 set (CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 option (XQC_ENABLE_BBR2 "enable bbr2" OFF)
@@ -22,6 +23,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+find_package(Threads)
 
 # SSL lib type, xquic support babassl and boringssl interfaces
 if(NOT SSL_TYPE)
@@ -107,8 +109,8 @@ if(NOT (CMAKE_C_COMPILER_ID MATCHES "MSVC" OR CMAKE_CXX_COMPILER_ID MATCHES "MSV
 endif()
 
 # C_FLAGS
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O2 -std=gnu11 -Wall ${CMAKE_C_FLAGS_OPTION} -DNDEBUG_PRINT -DNPRINT_MALLOC ")
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -g -O0 -std=gnu11 -Wall ${CMAKE_C_FLAGS_OPTION} -DNDEBUG_PRINT -DNPRINT_MALLOC -DXQC_DEBUG ")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O2 -Wall ${CMAKE_C_FLAGS_OPTION} -DNDEBUG_PRINT -DNPRINT_MALLOC ")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -g -O0 -Wall ${CMAKE_C_FLAGS_OPTION} -DNDEBUG_PRINT -DNPRINT_MALLOC -DXQC_DEBUG ")
 
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -387,14 +389,22 @@ add_library(
     STATIC
     ${XQC_SOURCE}
 )
-target_include_directories(xquic-static PUBLIC $<INSTALL_INTERFACE:include>)
+add_library(xquic::xquic-static ALIAS xquic-static)
+target_include_directories(xquic-static PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>  
+    $<INSTALL_INTERFACE:include>
+)
 
 add_library(
     xquic
     SHARED
     ${XQC_SOURCE}
 )
-target_include_directories(xquic PUBLIC $<INSTALL_INTERFACE:include>)
+add_library(xquic::xquic ALIAS xquic)
+target_include_directories(xquic PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>  
+    $<INSTALL_INTERFACE:include>
+)
 
 if(PLATFORM MATCHES "mac")
     target_link_libraries(
@@ -406,13 +416,27 @@ if(PLATFORM MATCHES "mac")
         -lstdc++
     )
 else()
-    target_link_libraries(
-        xquic
-        "-ldl -Wl,--whole-archive -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/scripts/xquic.lds"
-        ${SSL_LIB_PATH}
-        "-Wl,--no-whole-archive"
-        -lpthread
-    )
+    target_link_libraries(xquic PRIVATE Threads::Threads)
+    target_link_libraries(xquic-static PRIVATE Threads::Threads)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(xquic PRIVATE
+            "-ldl"
+            "-Wl,--whole-archive"
+            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/scripts/xquic.lds")
+        target_link_libraries(xquic PRIVATE ${SSL_LIB_PATH})
+        target_link_options(xquic PRIVATE "-Wl,--no-whole-archive")
+
+        target_link_options(xquic-static PRIVATE
+            "-ldl"
+            "-Wl,--whole-archive"
+            "--version-script=${CMAKE_CURRENT_SOURCE_DIR}/scripts/xquic.lds")
+        target_link_libraries(xquic-static PRIVATE ${SSL_LIB_PATH})
+        target_link_options(xquic-static PRIVATE "-Wl,--no-whole-archive")
+
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(xquic PRIVATE ${SSL_LIB_PATH})
+        target_link_libraries(xquic-static PRIVATE ${SSL_LIB_PATH})
+    endif()
 endif()
 
 
